@@ -44,7 +44,7 @@ bool getChessboardCorners(Mat inputImage, Size chessboardDimension, vector<Point
 }
 
 // Camera calibration
-void calibrateCamera(vector<Mat> inputImages, Size boardSize, float squareEdgeLength, Mat& cameraMatrix, Mat& distanceCoeff) 
+void calibrateCamera(vector<Mat> inputImages, Size boardSize, float squareEdgeLength, Mat& cameraMatrix, Mat& distortionCoeff, Mat& rVecs, Mat& tVecs) 
 {
 	// Get corners points from captured images
 	vector<vector<Point2f>> chessboardCorners;
@@ -62,47 +62,74 @@ void calibrateCamera(vector<Mat> inputImages, Size boardSize, float squareEdgeLe
 	chessboardCornersInWorldSpace.resize(chessboardCorners.size(), chessboardCornersInWorldSpace[0]);
 
 	// Calibrate camera
-	vector<Mat> rVecs, tVecs;
-
-	calibrateCamera(chessboardCornersInWorldSpace, chessboardCorners, boardSize, cameraMatrix, distanceCoeff, rVecs, tVecs);
+	calibrateCamera(chessboardCornersInWorldSpace, chessboardCorners, boardSize, cameraMatrix, distortionCoeff, rVecs, tVecs);
 }
 
 // Write calibration result to disk
-bool writeCalibrationResult(string filename, Mat cameraMatrix, Mat distanceCoeff) 
+bool writeCalibrationResult(string filename, Mat cameraMatrix, Mat distortionCoeff, Mat rVecs, Mat tVecs) 
 {
-	ofstream outStream(filename);
-	if (outStream)
+	ofstream outInStream(filename + "_intrinsic");
+	ofstream outExStream(filename + "_extrinsic");
+
+	if (outInStream)
 	{
 		// Write camera matrix
 		for (int r = 0; r < cameraMatrix.rows; r++)
 		{
 			for (int c = 0; c < cameraMatrix.cols; c++)
 			{
-				outStream << cameraMatrix.at<double>(r, c) << endl;
+				outInStream << cameraMatrix.at<double>(r, c) << endl;
 			}
 		}
 
-		// Write distance coeff
-		for (int r = 0; r < distanceCoeff.rows; r++)
+		// Write distortion coeff
+		for (int r = 0; r < distortionCoeff.rows; r++)
 		{
-			for (int c = 0; c < distanceCoeff.cols; c++)
+			for (int c = 0; c < distortionCoeff.cols; c++)
 			{
-				outStream << distanceCoeff.at<double>(r, c) << endl;
+				outInStream << distortionCoeff.at<double>(r, c) << endl;
 			}
 		}
 
-		outStream.close();
-		return true;
+		outInStream.close();
 	}
 	else
 		return false;
+
+	if (outExStream)
+	{
+		// Write rvecs
+		for (int r = 0; r < rVecs.rows; r++)
+		{
+			for (int c = 0; c < rVecs.cols; c++)
+			{
+				outExStream << rVecs.at<double>(r, c) << endl;
+			}
+		}
+
+		// Write tvecs
+		for (int r = 0; r < tVecs.rows; r++)
+		{
+			for (int c = 0; c < tVecs.cols; c++)
+			{
+				outExStream << tVecs.at<double>(r, c) << endl;
+			}
+		}
+
+		outExStream.close();
+	}
+	else
+		return false;
+
+	return true;
 }
 
 int main(int argc, char** argv)
 {
 	Mat frame, drawToFrame;
 	Mat cameraMatrix = Mat::eye(3, 3, CV_64F);
-	Mat distanceCoeff = Mat::zeros(8, 1, CV_64F);
+	Mat distortionCoeff = Mat::zeros(8, 1, CV_64F);
+	Mat tVecs, rVecs;
 	vector<Mat> capturedFrames;
 	vector<vector<Point2f>> markerCorners, rejectedCandidates;
 	VideoCapture vid(0);
@@ -146,8 +173,8 @@ int main(int argc, char** argv)
 			//start calibration
 			if (capturedFrames.size() > 15)
 			{
-				calibrateCamera(capturedFrames, chessboardDimension, calibrationSquareDimension, cameraMatrix, distanceCoeff);
-				writeCalibrationResult("calibration-result.txt", cameraMatrix, distanceCoeff);
+				calibrateCamera(capturedFrames, chessboardDimension, calibrationSquareDimension, cameraMatrix, distortionCoeff, rVecs, tVecs);
+				writeCalibrationResult("calibration-result.txt", cameraMatrix, distortionCoeff, rVecs, tVecs);
 			}
 			else
 				cout << "\nNeed more frames! Captured frames : " << capturedFrames.size();
