@@ -4,6 +4,8 @@
 #define DEBUG true
 
 #include "stdafx.h"
+#include <iostream> 
+#include <fstream>
 #include "opencv2/core.hpp"
 #include "opencv2/highgui.hpp"	
 #include "opencv2/calib3d.hpp"
@@ -30,22 +32,78 @@ void calculateKnownBoardPosition(Size boardSize, float boardEdgeLength, vector<P
 }
 
 // Process input image, and find all corners in the image
-void getChessboardCorners(Mat inputImage, Size chessboardDimension, vector<Vec2f>& foundCorners, Mat& outputImage)
+bool getChessboardCorners(Mat inputImage, Size chessboardDimension, vector<Point2f>& foundCorners, Mat& outputImage)
 {
-	// Find corners
 	bool found = findChessboardCorners(inputImage, chessboardDimension, foundCorners, CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_NORMALIZE_IMAGE);
 
 	// Render found corners to output image
 	inputImage.copyTo(outputImage);
 	drawChessboardCorners(outputImage, chessboardDimension, foundCorners, found);
+
+	return found;
 }
 
-int main()
+// Camera calibration
+void calibrateCamera(vector<Mat> inputImages, Size boardSize, float squareEdgeLength, Mat& cameraMatrix, Mat& distanceCoeff) 
+{
+	// Get corners points from captured images
+	vector<vector<Point2f>> chessboardCorners;
+	for (int i = 0; i < inputImages.size(); i++) 
+	{
+		vector<Point2f> pointBuff;
+		findChessboardCorners(inputImages[i], chessboardDimension, pointBuff, CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_NORMALIZE_IMAGE);
+
+		chessboardCorners.push_back(pointBuff);
+	}
+
+	// Remap corner points in world plane
+	vector<vector<Point3f>> chessboardCornersInWorldSpace(1);
+	calculateKnownBoardPosition(boardSize, squareEdgeLength, chessboardCornersInWorldSpace[0]);
+	chessboardCornersInWorldSpace.resize(chessboardCorners.size(), chessboardCornersInWorldSpace[0]);
+
+	// Calibrate camera
+	vector<Mat> rVecs, tVecs;
+
+	calibrateCamera(chessboardCornersInWorldSpace, chessboardCorners, boardSize, cameraMatrix, distanceCoeff, rVecs, tVecs);
+}
+
+// Write calibration result to disk
+bool writeCalibrationResult(string filename, Mat cameraMatrix, Mat distanceCoeff) 
+{
+	ofstream outStream(filename);
+	if (outStream)
+	{
+		// Write camera matrix
+		for (int r = 0; r < cameraMatrix.rows; r++)
+		{
+			for (int c = 0; c < cameraMatrix.cols; c++)
+			{
+				outStream << cameraMatrix.at<double>(r, c) << endl;
+			}
+		}
+
+		// Write distance coeff
+		for (int r = 0; r < distanceCoeff.rows; r++)
+		{
+			for (int c = 0; c < distanceCoeff.cols; c++)
+			{
+				outStream << distanceCoeff.at<double>(r, c) << endl;
+			}
+		}
+
+		outStream.close();
+		return true;
+	}
+	else
+		return false;
+}
+
+int main(int argc, char** argv)
 {
 	Mat frame, drawToFrame;
 	Mat cameraMatrix = Mat::eye(3, 3, CV_64F);
-	Mat distanceCoeff;
-	vector<Mat> savedImages;
+	Mat distanceCoeff = Mat::zeros(8, 1, CV_64F);
+	vector<Mat> capturedFrames;
 	vector<vector<Point2f>> markerCorners, rejectedCandidates;
 	VideoCapture vid(0);
 
@@ -56,8 +114,10 @@ int main()
 
 	namedWindow("OutputVideo", CV_WINDOW_AUTOSIZE);
 
-	vector<Vec2f> foundCorners;
+	cout << "Program start ...";
+	vector<Point2f> foundCorners;
 	char holdKey;
+	bool chessboardFound;
 	while (true)
 	{
 		if (!vid.read(frame))
@@ -65,12 +125,38 @@ int main()
 
 		// Clear vector
 		foundCorners.clear();
-		getChessboardCorners(frame, chessboardDimension, foundCorners, drawToFrame);
+		chessboardFound = getChessboardCorners(frame, chessboardDimension, foundCorners, drawToFrame);
 
 		// Stream to window
 		imshow("OutputVideo", drawToFrame);
 
 		holdKey = waitKey(1000 / fps);
+
+		// Key actions
+		switch (holdKey)
+		{
+		case ' ':
+			//capture frame
+			if (chessboardFound)
+				capturedFrames.push_back(frame.clone());
+			else
+				cout << "\nChessboard pattern not found!";
+			break;
+		case 13: // enter key
+			//start calibration
+			if (capturedFrames.size() > 15)
+			{
+				calibrateCamera(capturedFrames, chessboardDimension, calibrationSquareDimension, cameraMatrix, distanceCoeff);
+				writeCalibrationResult("calibration-result.txt", cameraMatrix, distanceCoeff);
+			}
+			else
+				cout << "\nNeed more frames! Captured frames : " << capturedFrames.size();
+			break;
+		case 27: // esc key
+			//exit program
+			return 0;
+			break;
+		}
 	}
 
 
